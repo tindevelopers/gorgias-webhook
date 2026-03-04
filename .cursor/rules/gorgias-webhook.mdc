@@ -1,0 +1,13 @@
+---
+description: Gorgias webhook API and Next.js App Router conventions
+globs: app/api/**/*.ts
+alwaysApply: false
+---
+
+# Gorgias Webhook API
+
+- API route lives at `app/api/webhooks/gorgias/route.ts`.
+- Only handle POST; return 405 for GET, PUT, DELETE.
+- When `message.from_agent === true`, return `{ success: true, ignored: "agent_message" }`.
+- Otherwise return `{ success: true, received_event: "<event>" }` (use `event` from payload or default `ticket-message-created`).
+- Use typed request/response and catch JSON parse errors with 400 + `{ success: false, error: "Invalid JSON body" }`.
