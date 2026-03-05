@@ -114,6 +114,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       asString(payload["type"]) ??
       undefined;
 
+    const eventContext =
+      asString(getNested(payload, "event", "context")) ??
+      undefined;
+
     const fromAgentRaw = getNested(payload, "message", "from_agent");
     const fromAgent = booleanish(fromAgentRaw);
 
@@ -211,7 +215,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
         console.log("[GorgiasWebhook] ABACUS_CALL_OK", { ticket: ticketId });
 
         console.log("[GorgiasWebhook] GORGIAS_POST_START", { ticket: ticketId });
-        await postGorgiasMessage({ ticketId, body: answer });
+        await postGorgiasMessage({ ticketId, body: answer, eventContext });
         console.log("[GorgiasWebhook] GORGIAS_POST_OK", { ticket: ticketId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

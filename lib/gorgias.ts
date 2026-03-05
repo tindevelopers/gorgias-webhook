@@ -1,6 +1,8 @@
 export interface PostGorgiasMessageArgs {
   ticketId: string;
   body: string;
+  /** Chat visitor/conversation ID from webhook event.context; used for source.to when set. */
+  eventContext?: string | null;
 }
 
 function requiredEnv(name: string): string {
@@ -111,7 +113,7 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       lastIdx = idx + raw.length;
     }
     if (lastIdx < text.length) out += escapeHtmlText(text.slice(lastIdx));
-    return out.replace(/\n/g, "<br>");
+    return `<p>${out.replace(/\n/g, "<br>")}</p>`;
   }
 
   const controller = new AbortController();
@@ -121,8 +123,9 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   try {
     const url = `${baseUrl}/tickets/${encodeURIComponent(args.ticketId)}/messages`;
 
-    // Chat requires source { type, to, from } with visitor ID - NOT receiver. See GORGIAS_CHAT_TROUBLESHOOTING_GUIDE.
-    const visitorId = await getChatVisitorId(args.ticketId);
+    // Chat requires source { type, to, from } with visitor ID. Prefer event.context from webhook.
+    const visitorId =
+      args.eventContext?.trim() || (await getChatVisitorId(args.ticketId));
     if (!visitorId) {
       console.error("[GorgiasWebhook] FAIL step=no_chat_visitor_id", { ticketId: args.ticketId });
       throw new Error("Could not find chat visitor ID for ticket");
@@ -161,6 +164,19 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
         body: resText?.slice(0, 4000),
       });
       throw new Error(`Gorgias HTTP ${res.status}`);
+    }
+    // Log delivery status when present (Gorgias sends async; failed_datetime = delivery failed)
+    try {
+      const created = resText ? (JSON.parse(resText) as Record<string, unknown>) : null;
+      const failedAt = created?.failed_datetime;
+      if (failedAt) {
+        console.warn("[GorgiasWebhook] message created but delivery failed", {
+          ticketId: args.ticketId,
+          failed_datetime: failedAt,
+        });
+      }
+    } catch {
+      /* ignore */
     }
   } finally {
     clearTimeout(t);
