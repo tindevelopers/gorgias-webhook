@@ -30,6 +30,38 @@ Server runs at [http://localhost:3000](http://localhost:3000).
 - Invalid JSON: `400` with `{ "success": false, "error": "Invalid JSON body" }`.
 - Non-POST methods: `405` with `{ "success": false, "error": "Method not allowed" }`.
 
+### Chat widget delivery (“Last message not delivered”)
+
+For replies to **show in the customer chat widget** (not only in the Gorgias ticket), the webhook must receive the **chat session ID** in the payload. In Gorgias:
+
+1. Go to **Apps → HTTP integration** (the one that calls this webhook).
+2. In **Request body**, ensure the JSON includes **`event.context`** so we can route the reply to the correct chat session.
+
+Example minimal body (Gorgias will substitute the `{{ ... }}` variables):
+
+```json
+{
+  "event": {
+    "context": "{{event.context}}",
+    "type": "{{event.type}}",
+    "user_id": "{{event.user_id}}"
+  },
+  "ticket": {
+    "id": "{{ticket.id}}",
+    "channel": "{{ticket.channel}}",
+    "customer": { "id": "{{ticket.customer.id}}", "name": "{{ticket.customer.name}}", "email": "{{ticket.customer.email}}" }
+  },
+  "message": {
+    "id": "{{message.id}}",
+    "channel": "{{message.channel}}",
+    "body_text": "{{message.body_text}}",
+    "from_agent": "{{message.from_agent}}"
+  }
+}
+```
+
+If **`event.context`** is missing, the app falls back to fetching the ticket for a visitor ID; that can produce “Last message not delivered” in the widget. Check Railway logs for `CHAT_WIDGET_DELIVERY: event.context missing` to confirm.
+
 ## Local smoke test (no Gorgias/Abacus)
 
 1. **Start the app**
@@ -153,6 +185,7 @@ Verifies the real-world path when Gorgias sends the webhook.
 | Webhook “ignores” | Check: `from_agent` is false and sender email ≠ `GORGIAS_EMAIL` (we ignore our own agent messages). |
 | Payload shape | Gorgias event payload may differ; ensure your route reads `ticket.id`, `message.body_text` (or `body`/`text`), `message.from_agent`, `message.sender.email`. |
 | Dedupe | Same `message.id` twice within TTL → ignored as duplicate. Use a new message id or wait. |
+| Reply in Gorgias but not in chat widget ("Last message not delivered") | Add `"context": "{{event.context}}"` to the `event` object in the Gorgias HTTP integration **Request body**. See [Chat widget delivery](#chat-widget-delivery-last-message-not-delivered) above. |
 
 To get an exact “final test” payload, paste (1) your route path (confirmed: **`/api/webhooks/gorgias`**) and (2) a sample real Gorgias webhook payload from **HTTP Integrations → Send test / View delivery**.
 

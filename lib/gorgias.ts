@@ -119,10 +119,16 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   try {
     const url = `${baseUrl}/tickets/${encodeURIComponent(args.ticketId)}/messages`;
 
-    // Chat requires source { type, to, from } with visitor ID. event.context = current chat session (best for widget delivery).
+    // Chat widget delivery: Gorgias needs source.to = current chat session ID. event.context from webhook is required for delivery.
     const fromEventContext = !!args.eventContext?.trim();
-    const visitorId =
-      args.eventContext?.trim() || (await getChatVisitorId(args.ticketId));
+    let visitorId = args.eventContext?.trim() || null;
+    if (!visitorId) {
+      visitorId = await getChatVisitorId(args.ticketId);
+      console.warn(
+        "[GorgiasWebhook] CHAT_WIDGET_DELIVERY: event.context missing from webhook — add \"context\": \"{{event.context}}\" to event in Gorgias HTTP Request body. Using ticket fetch fallback (may cause 'Last message not delivered').",
+        { ticketId: args.ticketId },
+      );
+    }
     if (!visitorId) {
       console.error("[GorgiasWebhook] FAIL step=no_chat_visitor_id", { ticketId: args.ticketId });
       throw new Error("Could not find chat visitor ID for ticket");
