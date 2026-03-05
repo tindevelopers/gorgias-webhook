@@ -50,13 +50,6 @@ export async function getChatVisitorId(ticketId: string): Promise<string | null>
     const meta = ticket?.meta as Record<string, unknown> | undefined;
     const chat = meta?.chat as Record<string, unknown> | undefined;
     if (chat?.conversation_id && typeof chat.conversation_id === "string") {
-      // #region agent log
-      const vid = chat.conversation_id;
-      console.log("[GorgiasWebhook] chat visitor id (meta)", {
-        ticketId,
-        visitorId_suffix: String(vid).slice(-6),
-      });
-      // #endregion
       return chat.conversation_id;
     }
     const customer = ticket?.customer as Record<string, unknown> | undefined;
@@ -64,23 +57,9 @@ export async function getChatVisitorId(ticketId: string): Promise<string | null>
     if (Array.isArray(channels)) {
       const chatCh = channels.find((ch) => ch?.type === "chat");
       if (chatCh?.address && typeof chatCh.address === "string") {
-        // #region agent log
-        const vid = chatCh.address;
-        console.log("[GorgiasWebhook] chat visitor id (channels)", {
-          ticketId,
-          visitorId_suffix: String(vid).slice(-6),
-        });
-        // #endregion
         return chatCh.address;
       }
     }
-    // #region agent log
-    console.warn("[GorgiasWebhook] chat visitor id not found", {
-      ticketId,
-      hasMetaChat: !!chat,
-      hasCustomerChannels: Array.isArray(channels),
-    });
-    // #endregion
     return null;
   } catch {
     return null;
@@ -123,15 +102,6 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       },
     };
 
-    // #region agent log
-    fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'gorgias.ts:95',message:'Gorgias payload',data:{hasSource:!!payload.source,visitorId},hypothesisId:'source',timestamp:Date.now()})}).catch(()=>{});
-    console.log("[GorgiasWebhook] posting chat message", {
-      ticketId: args.ticketId,
-      visitorId_suffix: String(visitorId).slice(-6),
-      hasSource: true,
-    });
-    // #endregion
-
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -150,18 +120,6 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       });
       throw new Error(`Gorgias HTTP ${res.status}`);
     }
-    // #region agent log
-    console.log("[GorgiasWebhook] gorgias message created", {
-      ticketId: args.ticketId,
-      httpStatus: res.status,
-    });
-    // #endregion
-    // #region agent log
-    try {
-      const resJson = resText ? JSON.parse(resText) : null;
-      fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'gorgias.ts:75',message:'Gorgias 200 response',data:{dataKeys:resJson&&typeof resJson==='object'?Object.keys(resJson):[]},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{});
-    } catch (_) {}
-    // #endregion
   } finally {
     clearTimeout(t);
   }

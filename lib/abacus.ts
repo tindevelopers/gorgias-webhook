@@ -91,9 +91,6 @@ export async function getAbacusAnswer(args: GetAbacusAnswerArgs): Promise<string
     });
 
     const text = await res.text();
-    // #region agent log
-    console.log("[DEBUG] abacus response", { textLen: text?.length ?? 0, status: res.status });
-    // #endregion
     let json: unknown = null;
     try {
       json = text ? (JSON.parse(text) as unknown) : null;

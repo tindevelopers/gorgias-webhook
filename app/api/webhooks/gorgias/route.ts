@@ -68,14 +68,7 @@ type WebhookResponse = IgnoredResponse | SuccessResponse | ErrorResponse;
 
 export async function POST(request: NextRequest): Promise<NextResponse<WebhookResponse>> {
   try {
-    // #region agent log
     const contentLength = request.headers.get("content-length");
-    const contentType = request.headers.get("content-type");
-    const requestId = request.headers.get("x-request-id") ?? request.headers.get("x-railway-request-id");
-    console.log("[DEBUG] POST entry", { contentLength, contentType });
-    console.log("[GorgiasWebhook] request ids", { requestId });
-    fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'route.ts:71',message:'POST entry',data:{contentLength,contentType,requestId},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (contentLength === "0" || contentLength === "" || contentLength === null) {
       return NextResponse.json<ErrorResponse>(
         {
@@ -91,10 +84,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       body = await request.json();
     } catch (parseErr) {
       const pe = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
-      // #region agent log
-      console.error("[DEBUG] request.json failed", { msg: pe.message });
-      fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'route.ts:86',message:'request.json failed',data:{msg:pe.message},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       return NextResponse.json<ErrorResponse>(
         { success: false, error: pe.message === "Unexpected end of JSON input" ? "Empty body" : "Invalid JSON body" },
         { status: 400 }
@@ -140,7 +129,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       ticket: ticketId ?? "unknown",
       msg: messageId ?? "unknown",
       from_agent: fromAgent,
-      from_agent_raw_type: typeof fromAgentRaw,
       event: eventType ?? "unknown",
     });
 
@@ -230,10 +218,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     const stack = err instanceof Error ? err.stack : undefined;
-    // #region agent log
-    console.error("[DEBUG] handler catch", { msg, stack: stack?.slice(0, 500) });
-    fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'route.ts:225',message:'handler catch',data:{msg,stackPreview:stack?.slice(0,300)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     console.error("[GorgiasWebhook] FAIL", { step: "handler", err: msg });
     return NextResponse.json<ErrorResponse>(
       { success: false, error: msg },
