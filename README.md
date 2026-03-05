@@ -62,6 +62,8 @@ Example minimal body (Gorgias will substitute the `{{ ... }}` variables):
 
 If **`event.context`** is missing, the app falls back to fetching the ticket for a visitor ID; that can produce “Last message not delivered” in the widget. Check Railway logs for `CHAT_WIDGET_DELIVERY: event.context missing` to confirm.
 
+If the reply appears in the Gorgias ticket but **not in the chat widget**, check Railway logs for `message created but delivery failed` and `last_sending_error`. You can try sending chat as plain text only by setting **`CHAT_SEND_BODY_HTML=false`** in your environment; if the widget then shows replies, the issue is with `body_html` formatting.
+
 ## Local smoke test (no Gorgias/Abacus)
 
 1. **Start the app**

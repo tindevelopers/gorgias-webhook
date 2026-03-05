@@ -141,11 +141,13 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
     });
 
+    const sendBodyHtml =
+      (process.env.CHAT_SEND_BODY_HTML ?? "true").trim().toLowerCase() !== "false";
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
-      // For chat widget: use HTML with linkified URLs when supported.
-      body_html: linkifyToHtml(args.body),
+      // For chat widget: HTML can break delivery; set CHAT_SEND_BODY_HTML=false to send plain text only.
+      ...(sendBodyHtml ? { body_html: linkifyToHtml(args.body) } : {}),
       channel: "chat",
       via: "api",
       from_agent: true,
@@ -157,6 +159,7 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       },
     };
     // Primary receiver (customer) is required for chat so the widget shows the message.
+    // Include channels with the chat address so Gorgias can deliver to the correct widget session.
     const customerId =
       args.customerId != null
         ? typeof args.customerId === "number"
@@ -164,7 +167,10 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
           : parseInt(String(args.customerId), 10)
         : NaN;
     if (Number.isFinite(customerId) && customerId > 0) {
-      payload.receiver = { id: customerId };
+      payload.receiver = {
+        id: customerId,
+        channels: [{ type: "chat", address: visitorId }],
+      };
     }
 
     const res = await fetch(url, {
@@ -190,10 +196,13 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
     try {
       const created = resText ? (JSON.parse(resText) as Record<string, unknown>) : null;
       const failedAt = created?.failed_datetime;
-      if (failedAt) {
+      const lastError = created?.last_sending_error as { error?: string } | undefined;
+      const errMsg = lastError?.error;
+      if (failedAt || errMsg) {
         console.warn("[GorgiasWebhook] message created but delivery failed", {
           ticketId: args.ticketId,
-          failed_datetime: failedAt,
+          failed_datetime: failedAt ?? undefined,
+          last_sending_error: errMsg ?? undefined,
         });
       }
     } catch {
