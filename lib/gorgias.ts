@@ -104,10 +104,18 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
     });
 
-    // Plain text only — no body_html, no linkify. Ensures chat widget receives and displays the message.
+    // Per Gorgias troubleshooting guide: working payload includes body_html as simple <p> (no links).
+    const safeHtml = (s: string) =>
+      s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/\n/g, "<br>");
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
+      body_html: `<p>${safeHtml(args.body)}</p>`,
       channel: "chat",
       via: "api",
       from_agent: true,

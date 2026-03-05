@@ -62,7 +62,7 @@ Example minimal body (Gorgias will substitute the `{{ ... }}` variables):
 
 If **`event.context`** is missing, the app falls back to fetching the ticket for a visitor ID; that can produce “Last message not delivered” in the widget. Check Railway logs for `CHAT_WIDGET_DELIVERY: event.context missing` to confirm.
 
-Chat messages are sent as **plain text only** (no `body_html`, no hyperlink conversion). This keeps the widget rendering reliable. If the reply appears in Gorgias but not in the widget, check logs for `message created but delivery failed` and `last_sending_error`.
+Message payload matches the Gorgias chat troubleshooting guide: `body_text` + `body_html` (simple `<p>...</p>`, no links), `source` with visitor ID, no `receiver`. **If the reply appears in Gorgias but not in the widget**, first verify `event.context` is in your HTTP integration Request body, then check logs for `message created but delivery failed` and `last_sending_error`.
 
 ## Local smoke test (no Gorgias/Abacus)
 
