@@ -84,25 +84,24 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   try {
     const url = `${baseUrl}/tickets/${encodeURIComponent(args.ticketId)}/messages`;
 
-    // Chat widget delivery: Gorgias needs source.to = current chat session ID. event.context from webhook is required for delivery.
-    const fromEventContext = !!args.eventContext?.trim();
-    let visitorId = args.eventContext?.trim() || null;
-    if (!visitorId) {
-      visitorId = await getChatVisitorId(args.ticketId);
-      console.warn(
-        "[GorgiasWebhook] CHAT_WIDGET_DELIVERY: event.context missing from webhook — add \"context\": \"{{event.context}}\" to event in Gorgias HTTP Request body. Using ticket fetch fallback (may cause 'Last message not delivered').",
-        { ticketId: args.ticketId },
-      );
-    }
+    // Per Gorgias troubleshooting guide: ALWAYS fetch visitor ID from ticket.meta.chat.conversation_id
+    // or customer.channels[type=chat].address. Do NOT use event.context — it is not the visitor/session ID.
+    const ticketVisitorId = await getChatVisitorId(args.ticketId);
+    const eventCtx = args.eventContext?.trim() || null;
+
+    const visitorId = ticketVisitorId;
+    console.log("[GorgiasWebhook] chat visitor source", {
+      ticketId: args.ticketId,
+      ticketVisitorId: ticketVisitorId ? `...${ticketVisitorId.slice(-8)}` : null,
+      eventContext: eventCtx ? `...${eventCtx.slice(-8)}` : null,
+      match: ticketVisitorId === eventCtx,
+      using: "ticket fetch (per troubleshooting guide)",
+    });
+
     if (!visitorId) {
       console.error("[GorgiasWebhook] FAIL step=no_chat_visitor_id", { ticketId: args.ticketId });
       throw new Error("Could not find chat visitor ID for ticket");
     }
-    console.log("[GorgiasWebhook] chat visitor source", {
-      ticketId: args.ticketId,
-      fromEventContext,
-      hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
-    });
 
     // Per Gorgias troubleshooting guide: working payload includes body_html as simple <p> (no links).
     const safeHtml = (s: string) =>
@@ -168,12 +167,22 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       });
       throw new Error(`Gorgias HTTP ${res.status}`);
     }
-    // Log delivery status when present (Gorgias sends async; failed_datetime = delivery failed)
+    // Log full response for debugging chat delivery
     try {
       const created = resText ? (JSON.parse(resText) as Record<string, unknown>) : null;
       const failedAt = created?.failed_datetime;
       const lastError = created?.last_sending_error as { error?: string } | undefined;
       const errMsg = lastError?.error;
+      const msgId = created?.id;
+      const sourceResp = created?.source as Record<string, unknown> | undefined;
+      console.log("[GorgiasWebhook] GORGIAS_RESPONSE", {
+        ticketId: args.ticketId,
+        messageId: msgId ?? null,
+        failed_datetime: failedAt ?? null,
+        last_sending_error: errMsg ?? null,
+        source_type: sourceResp?.type ?? null,
+        source_to: JSON.stringify(sourceResp?.to ?? null),
+      });
       if (failedAt || errMsg) {
         console.warn("[GorgiasWebhook] message created but delivery failed", {
           ticketId: args.ticketId,
@@ -181,25 +190,6 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
           last_sending_error: errMsg ?? undefined,
         });
       }
-      // #region agent log
-      fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
-        body: JSON.stringify({
-          sessionId: "6d486c",
-          location: "gorgias.ts:post_response",
-          message: "create message response delivery status",
-          data: {
-            ticketId: args.ticketId,
-            failed_datetime: failedAt ?? null,
-            last_sending_error: errMsg ?? null,
-            messageId: created?.id ?? null,
-            hypothesisId: "H2,H5",
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } catch {
       /* ignore */
     }
