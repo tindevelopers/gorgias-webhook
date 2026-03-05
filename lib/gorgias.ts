@@ -84,36 +84,36 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       .replace(/'/g, "&#39;");
   }
 
+  // Match other app that works in Gorgias chat: same regex + trailing punctuation strip + <p> wrapper.
   function linkifyToHtml(text: string): string {
-    const urlRe = /https?:\/\/[^\s<>"']+/g;
-    const trailingRe = /[)\],.;:!?]+$/;
-
-    let out = "";
-    let lastIdx = 0;
-    for (const m of text.matchAll(urlRe)) {
-      const raw = m[0];
-      const idx = m.index ?? 0;
-      if (idx > lastIdx) out += escapeHtmlText(text.slice(lastIdx, idx));
-
-      let url = raw;
-      let trailing = "";
-      // Strip common trailing punctuation so anchor href is valid.
-      while (true) {
-        const next = url.replace(trailingRe, "");
-        if (next === url) break;
-        trailing = url.slice(next.length) + trailing;
-        url = next;
+    const urlPattern = /(https?:\/\/[^\s]+)/g;
+    const parts: Array<{ isUrl: boolean; content: string }> = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = urlPattern.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ isUrl: false, content: text.slice(lastIndex, match.index) });
       }
-
-      const safeHref = escapeHtmlText(url);
-      const safeLabel = escapeHtmlText(url);
-      out += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
-      if (trailing) out += escapeHtmlText(trailing);
-
-      lastIdx = idx + raw.length;
+      parts.push({ isUrl: true, content: match[0] });
+      lastIndex = urlPattern.lastIndex;
     }
-    if (lastIdx < text.length) out += escapeHtmlText(text.slice(lastIdx));
-    return `<p>${out.replace(/\n/g, "<br>")}</p>`;
+    if (lastIndex < text.length) {
+      parts.push({ isUrl: false, content: text.slice(lastIndex) });
+    }
+
+    let html = "";
+    for (const part of parts) {
+      if (part.isUrl) {
+        const cleanUrl = part.content.replace(/[.,;:!?]$/, "");
+        const trailingPunc = part.content.slice(cleanUrl.length);
+        const safeLabel = escapeHtmlText(cleanUrl);
+        const safeHref = escapeHtmlText(cleanUrl);
+        html += `<a href="${safeHref}" target="_blank">${safeLabel}</a>${trailingPunc}`;
+      } else {
+        html += escapeHtmlText(part.content).replace(/\n/g, "<br>");
+      }
+    }
+    return `<p>${html}</p>`;
   }
 
   const controller = new AbortController();
