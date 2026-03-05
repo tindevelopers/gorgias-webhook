@@ -141,14 +141,23 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
     });
 
+    // Default: no body_html for chat so the widget receives the message. Linkified HTML (<a> tags) can
+    // cause the widget to reject or fail to display; use CHAT_SEND_BODY_HTML=true only if you need HTML
+    // (we then send safe escaped HTML without linkify to avoid breaking the widget).
     const sendBodyHtml =
-      (process.env.CHAT_SEND_BODY_HTML ?? "true").trim().toLowerCase() !== "false";
+      (process.env.CHAT_SEND_BODY_HTML ?? "false").trim().toLowerCase() === "true";
+    const linkifyUrls =
+      (process.env.CHAT_LINKIFY_URLS ?? "false").trim().toLowerCase() === "true";
+    const bodyHtmlContent = sendBodyHtml
+      ? linkifyUrls
+        ? linkifyToHtml(args.body)
+        : `<p>${escapeHtmlText(args.body).replace(/\n/g, "<br>")}</p>`
+      : null;
     // Per Gorgias troubleshooting: chat uses source only; receiver is for email/SMS and can break chat delivery.
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
-      // For chat widget: HTML can break delivery; set CHAT_SEND_BODY_HTML=false to send plain text only.
-      ...(sendBodyHtml ? { body_html: linkifyToHtml(args.body) } : {}),
+      ...(bodyHtmlContent ? { body_html: bodyHtmlContent } : {}),
       channel: "chat",
       via: "api",
       from_agent: true,
@@ -175,6 +184,7 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
           visitorIdSuffix,
           fromEventContext,
           sendBodyHtml,
+          linkifyUrls,
           noReceiver: true,
           hypothesisId: "H1,H2,H3",
         },
