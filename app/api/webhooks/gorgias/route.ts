@@ -71,8 +71,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
     // #region agent log
     const contentLength = request.headers.get("content-length");
     const contentType = request.headers.get("content-type");
+    const requestId = request.headers.get("x-request-id") ?? request.headers.get("x-railway-request-id");
     console.log("[DEBUG] POST entry", { contentLength, contentType });
-    fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'route.ts:71',message:'POST entry',data:{contentLength,contentType},timestamp:Date.now()})}).catch(()=>{});
+    console.log("[GorgiasWebhook] request ids", { requestId });
+    fetch('http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6d486c'},body:JSON.stringify({sessionId:'6d486c',location:'route.ts:71',message:'POST entry',data:{contentLength,contentType,requestId},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     if (contentLength === "0" || contentLength === "" || contentLength === null) {
       return NextResponse.json<ErrorResponse>(
@@ -138,6 +140,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       ticket: ticketId ?? "unknown",
       msg: messageId ?? "unknown",
       from_agent: fromAgent,
+      from_agent_raw_type: typeof fromAgentRaw,
       event: eventType ?? "unknown",
     });
 
