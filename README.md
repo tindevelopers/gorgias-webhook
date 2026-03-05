@@ -189,9 +189,24 @@ In Gorgias:
 - **Settings → Integrations → HTTP Integrations → Add integration**
 - **Trigger/Event**: Ticket message created (or equivalent message-created event)
 - **Method**: POST
-- **URL**: `https://<your-vercel-domain>/api/webhooks/gorgias`
-- **Content-Type**: `application/json`
-- **Headers**: none required for MVP
+- **URL**: `https://<your-domain>/api/webhooks/gorgias`
+- **Request body (JSON)**: **Required.** If left empty, Gorgias sends `Content-Length: 0` and the webhook returns 400. Add a JSON template with Gorgias variables, for example:
+
+  ```json
+  {
+    "event": "message_created",
+    "ticket_id": "{{ticket.id}}",
+    "ticket": { "id": "{{ticket.id}}", "customer": { "email": "{{ticket.customer.email}}" } },
+    "message": {
+      "id": "{{message.id}}",
+      "body_text": "{{message.body_text}}",
+      "from_agent": "{{message.from_agent}}",
+      "sender": { "email": "{{message.sender.email}}" }
+    }
+  }
+  ```
+
+  Use the exact variable syntax from Gorgias (e.g. `{{ticket.id}}` or `((ticket.id))` — check "See full list of variables" in the integration form).
 
 After saving, send a test message in Live Chat:
 
@@ -205,3 +220,20 @@ npm run build
 ```
 
 Then connect the repo to Vercel or use the Vercel CLI. The App Router and API route are compatible with Vercel serverless functions.
+
+## Deploy to Railway and push env vars
+
+1. Install the Railway CLI: `npm install -g @railway/cli`
+2. Log in (opens browser): `railway login`
+3. From the project root, link the repo to your Railway project and service:
+   ```bash
+   railway link
+   ```
+   Choose the **gorgias-webhook** project and service (and environment, e.g. production). Or link by id:
+   `railway link -p PROJECT_ID -s gorgias-webhook -e production`
+4. Push local env vars from `.env.local` to Railway:
+   ```bash
+   ./scripts/railway-push-env.sh
+   ```
+   Override the service name if needed: `RAILWAY_SERVICE=your-service ./scripts/railway-push-env.sh`
+5. Deploy: `railway up` (or rely on GitHub integration if connected).
