@@ -26,9 +26,44 @@ Server runs at [http://localhost:3000](http://localhost:3000).
 ### Behavior
 
 - If `message.from_agent === true`: responds with `{ "success": true, "ignored": "agent_message" }`.
-- Otherwise: responds with `{ "success": true, "received_event": "ticket-message-created" }` (or the `event` value from the payload if present).
+- Otherwise: calls Abacus to generate a reply, then posts it back into the same Gorgias ticket conversation.
 - Invalid JSON: `400` with `{ "success": false, "error": "Invalid JSON body" }`.
 - Non-POST methods: `405` with `{ "success": false, "error": "Method not allowed" }`.
+
+## Environment variables
+
+Create `.env.local` (do not commit) and set:
+
+```bash
+# Gorgias
+GORGIAS_DOMAIN=pawpointers
+GORGIAS_API_KEY=...
+GORGIAS_EMAIL=developer@tin.info
+
+# Abacus
+ABACUS_API_KEY=...
+ABACUS_APP_BASE_URL=https://gorgiastest.abacusai.app
+ABACUS_CHAT_ENDPOINT=/chat
+ABACUS_CHATBOT_ID=...
+ABACUS_DEPLOYMENT_ID=...
+ABACUS_CONV_KEY_STRATEGY=ticket
+```
+
+## Configure Gorgias HTTP Integration (MVP)
+
+In Gorgias:
+
+- **Settings → Integrations → HTTP Integrations → Add integration**
+- **Trigger/Event**: Ticket message created (or equivalent message-created event)
+- **Method**: POST
+- **URL**: `https://<your-vercel-domain>/api/webhooks/gorgias`
+- **Content-Type**: `application/json`
+- **Headers**: none required for MVP
+
+After saving, send a test message in Live Chat:
+
+- Verify in **HTTP Integrations → Events** that the webhook shows **200**.
+- Verify in the ticket conversation that an automated reply is posted back.
 
 ## Deploy to Vercel
 
