@@ -73,6 +73,47 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   const auth = buildAuthHeader();
   const email = requiredEnv("GORGIAS_EMAIL");
 
+  function escapeHtmlText(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function linkifyToHtml(text: string): string {
+    const urlRe = /https?:\/\/[^\s<>"']+/g;
+    const trailingRe = /[)\],.;:!?]+$/;
+
+    let out = "";
+    let lastIdx = 0;
+    for (const m of text.matchAll(urlRe)) {
+      const raw = m[0];
+      const idx = m.index ?? 0;
+      if (idx > lastIdx) out += escapeHtmlText(text.slice(lastIdx, idx));
+
+      let url = raw;
+      let trailing = "";
+      // Strip common trailing punctuation so anchor href is valid.
+      while (true) {
+        const next = url.replace(trailingRe, "");
+        if (next === url) break;
+        trailing = url.slice(next.length) + trailing;
+        url = next;
+      }
+
+      const safeHref = escapeHtmlText(url);
+      const safeLabel = escapeHtmlText(url);
+      out += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
+      if (trailing) out += escapeHtmlText(trailing);
+
+      lastIdx = idx + raw.length;
+    }
+    if (lastIdx < text.length) out += escapeHtmlText(text.slice(lastIdx));
+    return out.replace(/\n/g, "<br>");
+  }
+
   const controller = new AbortController();
   const timeoutMs = Number(process.env.GORGIAS_TIMEOUT_MS || 20000);
   const t = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 20000);
@@ -90,7 +131,8 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
-      body_html: args.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>"),
+      // For chat widget: use HTML with linkified URLs when supported.
+      body_html: linkifyToHtml(args.body),
       channel: "chat",
       via: "api",
       from_agent: true,
