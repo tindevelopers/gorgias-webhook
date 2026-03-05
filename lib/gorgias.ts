@@ -143,6 +143,7 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
 
     const sendBodyHtml =
       (process.env.CHAT_SEND_BODY_HTML ?? "true").trim().toLowerCase() !== "false";
+    // Per Gorgias troubleshooting: chat uses source only; receiver is for email/SMS and can break chat delivery.
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
@@ -158,20 +159,29 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
         from: { address: "" },
       },
     };
-    // Primary receiver (customer) is required for chat so the widget shows the message.
-    // Include channels with the chat address so Gorgias can deliver to the correct widget session.
-    const customerId =
-      args.customerId != null
-        ? typeof args.customerId === "number"
-          ? args.customerId
-          : parseInt(String(args.customerId), 10)
-        : NaN;
-    if (Number.isFinite(customerId) && customerId > 0) {
-      payload.receiver = {
-        id: customerId,
-        channels: [{ type: "chat", address: visitorId }],
-      };
-    }
+    // Do NOT send receiver for chat — doc: "receiver: Used for email/SMS, NOT for chat". Sending receiver can cause "Last message not delivered".
+
+    // #region agent log
+    const visitorIdSuffix = visitorId ? visitorId.slice(-8) : "";
+    fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
+      body: JSON.stringify({
+        sessionId: "6d486c",
+        location: "gorgias.ts:pre_post",
+        message: "payload before create message",
+        data: {
+          ticketId: args.ticketId,
+          visitorIdSuffix,
+          fromEventContext,
+          sendBodyHtml,
+          noReceiver: true,
+          hypothesisId: "H1,H2,H3",
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
 
     const res = await fetch(url, {
       method: "POST",
@@ -205,6 +215,25 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
           last_sending_error: errMsg ?? undefined,
         });
       }
+      // #region agent log
+      fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
+        body: JSON.stringify({
+          sessionId: "6d486c",
+          location: "gorgias.ts:post_response",
+          message: "create message response delivery status",
+          data: {
+            ticketId: args.ticketId,
+            failed_datetime: failedAt ?? null,
+            last_sending_error: errMsg ?? null,
+            messageId: created?.id ?? null,
+            hypothesisId: "H2,H5",
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch {
       /* ignore */
     }

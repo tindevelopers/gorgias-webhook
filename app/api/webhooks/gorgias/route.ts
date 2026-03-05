@@ -138,6 +138,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
     });
 
     if (fromAgent) {
+      // #region agent log
+      fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
+        body: JSON.stringify({
+          sessionId: "6d486c",
+          location: "route.ts:fromAgent",
+          message: "ignored agent_message",
+          data: { ticketId: ticketId ?? null, hypothesisId: "H4" },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       return NextResponse.json<IgnoredResponse>({
         success: true,
         ignored: "agent_message",
@@ -205,6 +218,19 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
 
     // Gorgias HTTP integrations can time out quickly (e.g. 5s). We acknowledge immediately,
     // then process Abacus + Gorgias posting asynchronously in the background.
+    // #region agent log
+    fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
+      body: JSON.stringify({
+        sessionId: "6d486c",
+        location: "route.ts:async_queued",
+        message: "customer message queued for Abacus+Gorgias",
+        data: { ticketId, hasEventContext: !!eventContext?.trim(), hypothesisId: "H1,H4" },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     void (async () => {
       try {
         const convStrategy = (process.env.ABACUS_CONV_KEY_STRATEGY || "ticket").trim().toLowerCase();
