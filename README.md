@@ -30,6 +30,134 @@ Server runs at [http://localhost:3000](http://localhost:3000).
 - Invalid JSON: `400` with `{ "success": false, "error": "Invalid JSON body" }`.
 - Non-POST methods: `405` with `{ "success": false, "error": "Method not allowed" }`.
 
+## Local smoke test (no Gorgias/Abacus)
+
+1. **Start the app**
+
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+2. **Env for dry run** (optional). Create `.env.local` with `DRY_RUN=true` so the route does not call Abacus or Gorgias. You can use placeholder values for other vars; they are only used when `DRY_RUN` is not set.
+
+3. **Hit the webhook with a fake payload**
+
+   In a second terminal:
+
+   ```bash
+   curl -i -X POST "http://localhost:3000/api/webhooks/gorgias" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "event": "message_created",
+       "ticket": { "id": 123, "customer": { "email": "customer@example.com" } },
+       "message": {
+         "id": 456,
+         "body_text": "Hello — smoke test",
+         "from_agent": false,
+         "sender": { "email": "customer@example.com" }
+       }
+     }'
+   ```
+
+   Or run the script: `./scripts/smoke-test.sh`
+
+4. **Expected**
+
+   - **HTTP 200** with `{ "success": true, "ticket_id": "123", "dry_run": true }` when `DRY_RUN=true`.
+   - Or `{ "success": true, "ticket_id": "123", ... }` when using real Abacus + Gorgias.
+   - Or `{ "success": true, "ignored": "missing_fields" }` if the payload is missing required fields.
+
+5. **Logs**
+
+   You should see in the dev server:
+
+   - `[GorgiasWebhook] INBOUND`
+   - `[GorgiasWebhook] ABACUS_CALL_START` (or `... dry run`)
+   - `[GorgiasWebhook] GORGIAS_POST_START` (or `... dry run`)
+
+   With `DRY_RUN=true`, Abacus and Gorgias are not called.
+
+---
+
+## Testing ladder
+
+Run these in order to isolate failures.
+
+### 2) Unit test: Abacus only (no Gorgias)
+
+Confirms Abacus credentials and request format. Uses the **getChatResponse** API directly (different from the app’s `lib/abacus` if you use a custom backend).
+
+Set in `.env.local` (or export):
+
+- `ABACUS_DEPLOYMENT_TOKEN`
+- `ABACUS_DEPLOYMENT_ID`
+
+Then:
+
+```bash
+./scripts/test-abacus-only.sh
+# Or with a custom marker:
+./scripts/test-abacus-only.sh PSD_OK_123
+```
+
+**Pass:** Abacus response contains the marker (e.g. `PSD_OK_123`) or clearly acknowledges it.  
+**If it fails:** Fix Abacus config (token, deployment id, URL) first.
+
+### 3) Unit test: Gorgias posting only (no Abacus)
+
+Confirms Gorgias API credentials. Pick a test ticket in Gorgias and use its id.
+
+```bash
+TICKET_ID=123456789 ./scripts/test-gorgias-only.sh
+```
+
+**Pass:** The message "Gorgias API test: GORGIAS_OK_123" appears in that ticket.  
+**If it fails:** Fix Gorgias domain, email, API key, and/or `postGorgiasMessage()`.
+
+### 4) Full local e2e: webhook → Abacus → Gorgias
+
+Set `DRY_RUN=false` (or remove it) and use real credentials. Use a **real ticket id** so the post-back succeeds.
+
+```bash
+# In one terminal
+npm run dev
+
+# In another
+REAL_TICKET_ID=123456789 ./scripts/test-webhook-e2e.sh
+```
+
+**Pass:**
+
+- Webhook returns **200** with `{ "success": true }`.
+- Logs show: `INBOUND` → `ABACUS_CALL_OK` → `GORGIAS_POST_OK`.
+- The ticket in Gorgias gets a new message containing `FULL_OK_123` (or equivalent).
+
+### 5) Real Gorgias → local webhook (ngrok) e2e
+
+Verifies the real-world path when Gorgias sends the webhook.
+
+1. Run `npm run dev`.
+2. In another terminal: `ngrok http 3000`.
+3. In Gorgias: set webhook URL to `https://<ngrok-host>/api/webhooks/gorgias`.
+4. Send a message in the Gorgias chat widget.
+
+**Pass:** ngrok shows the POST; local logs show the pipeline; reply appears in the chat/ticket.
+
+### 6) Common “it runs but nothing posts” issues
+
+| Issue | Fix |
+|-------|-----|
+| Using localhost URL in Gorgias | Gorgias can’t reach localhost → use ngrok (or another tunnel). |
+| Wrong path | Use **`/api/webhooks/gorgias`** (not `/api/gorgias/webhook`). |
+| Webhook “ignores” | Check: `from_agent` is false and sender email ≠ `GORGIAS_EMAIL` (we ignore our own agent messages). |
+| Payload shape | Gorgias event payload may differ; ensure your route reads `ticket.id`, `message.body_text` (or `body`/`text`), `message.from_agent`, `message.sender.email`. |
+| Dedupe | Same `message.id` twice within TTL → ignored as duplicate. Use a new message id or wait. |
+
+To get an exact “final test” payload, paste (1) your route path (confirmed: **`/api/webhooks/gorgias`**) and (2) a sample real Gorgias webhook payload from **HTTP Integrations → Send test / View delivery**.
+
+---
+
 ## Environment variables
 
 Create `.env.local` (do not commit) and set:
@@ -47,7 +175,12 @@ ABACUS_CHAT_ENDPOINT=/chat
 ABACUS_CHATBOT_ID=...
 ABACUS_DEPLOYMENT_ID=...
 ABACUS_CONV_KEY_STRATEGY=ticket
+
+# Local smoke test without calling real APIs (no keys needed for curl test)
+DRY_RUN=true
 ```
+
+See `.env.example` for a full list. With `DRY_RUN=true`, Abacus and Gorgias are not called.
 
 ## Configure Gorgias HTTP Integration (MVP)
 

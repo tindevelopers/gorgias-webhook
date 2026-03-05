@@ -55,6 +55,7 @@ interface SuccessResponse {
   ticket_id?: string;
   message_id?: string;
   received_event?: string;
+  dry_run?: boolean;
 }
 
 /** Error response shape */
@@ -153,6 +154,23 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
         { success: true, ignored: "missing_fields" },
         { status: 200 }
       );
+    }
+
+    const dryRun = process.env.DRY_RUN === "true" || process.env.DRY_RUN === "1";
+
+    if (dryRun) {
+      console.log("[GorgiasWebhook] DRY_RUN — skipping Abacus and Gorgias");
+      console.log("[GorgiasWebhook] ABACUS_CALL_START (dry run)", { ticket: ticketId });
+      console.log("[GorgiasWebhook] ABACUS_CALL_OK (dry run)", { ticket: ticketId });
+      console.log("[GorgiasWebhook] GORGIAS_POST_START (dry run)", { ticket: ticketId });
+      console.log("[GorgiasWebhook] GORGIAS_POST_OK (dry run)", { ticket: ticketId });
+      return NextResponse.json<SuccessResponse>({
+        success: true,
+        ticket_id: ticketId,
+        message_id: messageId ?? undefined,
+        received_event: eventType ?? undefined,
+        dry_run: true,
+      });
     }
 
     const convStrategy = (process.env.ABACUS_CONV_KEY_STRATEGY || "ticket").trim().toLowerCase();

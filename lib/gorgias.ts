@@ -16,8 +16,17 @@ export function buildAuthHeader(): string {
   return `Basic ${token}`;
 }
 
+function normalizeGorgiasDomain(domain: string): string {
+  const d = domain.trim();
+  if (d.includes("gorgias.com")) {
+    const withoutProtocol = d.replace(/^https?:\/\//, "");
+    return withoutProtocol.split(".gorgias.com")[0] ?? d;
+  }
+  return d;
+}
+
 export function buildGorgiasBaseUrl(): string {
-  const domain = requiredEnv("GORGIAS_DOMAIN");
+  const domain = normalizeGorgiasDomain(requiredEnv("GORGIAS_DOMAIN"));
   return `https://${domain}.gorgias.com/api`;
 }
 
@@ -33,10 +42,14 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   try {
     const url = `${baseUrl}/tickets/${encodeURIComponent(args.ticketId)}/messages`;
 
-    // Gorgias API fields can vary by channel/account; keep payload minimal and text-first.
+    // Gorgias API: channel, via, sender, body_text (and optionally body_html) are required.
     const payload: Record<string, unknown> = {
       body: args.body,
+      body_text: args.body,
+      body_html: args.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>"),
       channel: "chat",
+      via: "api",
+      from_agent: true,
       sender: { type: "agent", email },
     };
 
