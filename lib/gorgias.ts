@@ -84,36 +84,32 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       .replace(/'/g, "&#39;");
   }
 
-  // Match other app that works in Gorgias chat: same regex + trailing punctuation strip + <p> wrapper.
+  // Linkify URLs for body_html. Use conservative regex so chat delivery does not break (avoid [^\s]+).
   function linkifyToHtml(text: string): string {
-    const urlPattern = /(https?:\/\/[^\s]+)/g;
-    const parts: Array<{ isUrl: boolean; content: string }> = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = urlPattern.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push({ isUrl: false, content: text.slice(lastIndex, match.index) });
+    const urlRe = /https?:\/\/[^\s<>"']+/g;
+    const trailingRe = /[)\],.;:!?]+$/;
+    let out = "";
+    let lastIdx = 0;
+    for (const m of text.matchAll(urlRe)) {
+      const raw = m[0];
+      const idx = m.index ?? 0;
+      if (idx > lastIdx) out += escapeHtmlText(text.slice(lastIdx, idx));
+      let url = raw;
+      let trailing = "";
+      while (true) {
+        const next = url.replace(trailingRe, "");
+        if (next === url) break;
+        trailing = url.slice(next.length) + trailing;
+        url = next;
       }
-      parts.push({ isUrl: true, content: match[0] });
-      lastIndex = urlPattern.lastIndex;
+      const safeHref = escapeHtmlText(url);
+      const safeLabel = escapeHtmlText(url);
+      out += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
+      if (trailing) out += escapeHtmlText(trailing);
+      lastIdx = idx + raw.length;
     }
-    if (lastIndex < text.length) {
-      parts.push({ isUrl: false, content: text.slice(lastIndex) });
-    }
-
-    let html = "";
-    for (const part of parts) {
-      if (part.isUrl) {
-        const cleanUrl = part.content.replace(/[.,;:!?]$/, "");
-        const trailingPunc = part.content.slice(cleanUrl.length);
-        const safeLabel = escapeHtmlText(cleanUrl);
-        const safeHref = escapeHtmlText(cleanUrl);
-        html += `<a href="${safeHref}" target="_blank">${safeLabel}</a>${trailingPunc}`;
-      } else {
-        html += escapeHtmlText(part.content).replace(/\n/g, "<br>");
-      }
-    }
-    return `<p>${html}</p>`;
+    if (lastIdx < text.length) out += escapeHtmlText(text.slice(lastIdx));
+    return `<p>${out.replace(/\n/g, "<br>")}</p>`;
   }
 
   const controller = new AbortController();
@@ -123,13 +119,19 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   try {
     const url = `${baseUrl}/tickets/${encodeURIComponent(args.ticketId)}/messages`;
 
-    // Chat requires source { type, to, from } with visitor ID. Prefer event.context from webhook.
+    // Chat requires source { type, to, from } with visitor ID. event.context = current chat session (best for widget delivery).
+    const fromEventContext = !!args.eventContext?.trim();
     const visitorId =
       args.eventContext?.trim() || (await getChatVisitorId(args.ticketId));
     if (!visitorId) {
       console.error("[GorgiasWebhook] FAIL step=no_chat_visitor_id", { ticketId: args.ticketId });
       throw new Error("Could not find chat visitor ID for ticket");
     }
+    console.log("[GorgiasWebhook] chat visitor source", {
+      ticketId: args.ticketId,
+      fromEventContext,
+      hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
+    });
 
     const payload: Record<string, unknown> = {
       body: args.body,
