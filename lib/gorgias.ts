@@ -139,7 +139,7 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
         data: {
           ticketId: args.ticketId,
           visitorIdSuffix,
-          fromEventContext,
+          usedTicketFetch: true,
           noReceiver: true,
           hypothesisId: "H1,H2,H3",
         },
