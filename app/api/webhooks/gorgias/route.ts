@@ -170,6 +170,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       asString(getNested(payload, "customer", "email")) ??
       undefined;
 
+    const customerId =
+      asString(getNested(payload, "ticket", "customer", "id")) ??
+      asString(getNested(payload, "customer", "id")) ??
+      undefined;
+
     if (!ticketId || !messageText) {
       console.warn("[GorgiasWebhook] FAIL step=payload_parse", {
         ticketId,
@@ -215,7 +220,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
         console.log("[GorgiasWebhook] ABACUS_CALL_OK", { ticket: ticketId });
 
         console.log("[GorgiasWebhook] GORGIAS_POST_START", { ticket: ticketId });
-        await postGorgiasMessage({ ticketId, body: answer, eventContext });
+        await postGorgiasMessage({ ticketId, body: answer, eventContext, customerId });
         console.log("[GorgiasWebhook] GORGIAS_POST_OK", { ticket: ticketId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

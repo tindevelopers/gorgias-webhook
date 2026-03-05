@@ -3,6 +3,8 @@ export interface PostGorgiasMessageArgs {
   body: string;
   /** Chat visitor/conversation ID from webhook event.context; used for source.to when set. */
   eventContext?: string | null;
+  /** Gorgias customer ID (ticket.customer.id); used as receiver for chat so the widget shows the reply. */
+  customerId?: string | number | null;
 }
 
 function requiredEnv(name: string): string {
@@ -154,10 +156,21 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
         from: { address: "" },
       },
     };
+    // Primary receiver (customer) is required for chat so the widget shows the message.
+    const customerId =
+      args.customerId != null
+        ? typeof args.customerId === "number"
+          ? args.customerId
+          : parseInt(String(args.customerId), 10)
+        : NaN;
+    if (Number.isFinite(customerId) && customerId > 0) {
+      payload.receiver = { id: customerId };
+    }
 
     const res = await fetch(url, {
       method: "POST",
       headers: {
+        accept: "application/json",
         "content-type": "application/json",
         authorization: auth,
       },
