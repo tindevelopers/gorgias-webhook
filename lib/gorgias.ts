@@ -77,43 +77,6 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
   const auth = buildAuthHeader();
   const email = requiredEnv("GORGIAS_EMAIL");
 
-  function escapeHtmlText(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  // Linkify URLs for body_html. Use conservative regex so chat delivery does not break (avoid [^\s]+).
-  function linkifyToHtml(text: string): string {
-    const urlRe = /https?:\/\/[^\s<>"']+/g;
-    const trailingRe = /[)\],.;:!?]+$/;
-    let out = "";
-    let lastIdx = 0;
-    for (const m of text.matchAll(urlRe)) {
-      const raw = m[0];
-      const idx = m.index ?? 0;
-      if (idx > lastIdx) out += escapeHtmlText(text.slice(lastIdx, idx));
-      let url = raw;
-      let trailing = "";
-      while (true) {
-        const next = url.replace(trailingRe, "");
-        if (next === url) break;
-        trailing = url.slice(next.length) + trailing;
-        url = next;
-      }
-      const safeHref = escapeHtmlText(url);
-      const safeLabel = escapeHtmlText(url);
-      out += `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${safeLabel}</a>`;
-      if (trailing) out += escapeHtmlText(trailing);
-      lastIdx = idx + raw.length;
-    }
-    if (lastIdx < text.length) out += escapeHtmlText(text.slice(lastIdx));
-    return `<p>${out.replace(/\n/g, "<br>")}</p>`;
-  }
-
   const controller = new AbortController();
   const timeoutMs = Number(process.env.GORGIAS_TIMEOUT_MS || 20000);
   const t = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : 20000);
@@ -141,23 +104,10 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       hint: fromEventContext ? "event.context from webhook" : "ticket fetch fallback",
     });
 
-    // Default: no body_html for chat so the widget receives the message. Linkified HTML (<a> tags) can
-    // cause the widget to reject or fail to display; use CHAT_SEND_BODY_HTML=true only if you need HTML
-    // (we then send safe escaped HTML without linkify to avoid breaking the widget).
-    const sendBodyHtml =
-      (process.env.CHAT_SEND_BODY_HTML ?? "false").trim().toLowerCase() === "true";
-    const linkifyUrls =
-      (process.env.CHAT_LINKIFY_URLS ?? "false").trim().toLowerCase() === "true";
-    const bodyHtmlContent = sendBodyHtml
-      ? linkifyUrls
-        ? linkifyToHtml(args.body)
-        : `<p>${escapeHtmlText(args.body).replace(/\n/g, "<br>")}</p>`
-      : null;
-    // Per Gorgias troubleshooting: chat uses source only; receiver is for email/SMS and can break chat delivery.
+    // Plain text only — no body_html, no linkify. Ensures chat widget receives and displays the message.
     const payload: Record<string, unknown> = {
       body: args.body,
       body_text: args.body,
-      ...(bodyHtmlContent ? { body_html: bodyHtmlContent } : {}),
       channel: "chat",
       via: "api",
       from_agent: true,
@@ -183,8 +133,6 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
           ticketId: args.ticketId,
           visitorIdSuffix,
           fromEventContext,
-          sendBodyHtml,
-          linkifyUrls,
           noReceiver: true,
           hypothesisId: "H1,H2,H3",
         },
