@@ -56,6 +56,7 @@ interface SuccessResponse {
   message_id?: string;
   received_event?: string;
   dry_run?: boolean;
+  queued?: boolean;
 }
 
 /** Error response shape */
@@ -193,24 +194,34 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
       });
     }
 
-    const convStrategy = (process.env.ABACUS_CONV_KEY_STRATEGY || "ticket").trim().toLowerCase();
-    const conversationId = convStrategy === "ticket" ? ticketId : ticketId;
+    // Gorgias HTTP integrations can time out quickly (e.g. 5s). We acknowledge immediately,
+    // then process Abacus + Gorgias posting asynchronously in the background.
+    void (async () => {
+      try {
+        const convStrategy = (process.env.ABACUS_CONV_KEY_STRATEGY || "ticket").trim().toLowerCase();
+        const conversationId = convStrategy === "ticket" ? ticketId : ticketId;
 
-    console.log("[GorgiasWebhook] ABACUS_CALL_START", { ticket: ticketId });
-    const answer = await getAbacusAnswer({
-      conversationId,
-      message: messageText,
-      customerEmail,
-      ticketId,
-    });
-    console.log("[GorgiasWebhook] ABACUS_CALL_OK", { ticket: ticketId });
+        console.log("[GorgiasWebhook] ABACUS_CALL_START", { ticket: ticketId });
+        const answer = await getAbacusAnswer({
+          conversationId,
+          message: messageText,
+          customerEmail,
+          ticketId,
+        });
+        console.log("[GorgiasWebhook] ABACUS_CALL_OK", { ticket: ticketId });
 
-    console.log("[GorgiasWebhook] GORGIAS_POST_START", { ticket: ticketId });
-    await postGorgiasMessage({ ticketId, body: answer });
-    console.log("[GorgiasWebhook] GORGIAS_POST_OK", { ticket: ticketId });
+        console.log("[GorgiasWebhook] GORGIAS_POST_START", { ticket: ticketId });
+        await postGorgiasMessage({ ticketId, body: answer });
+        console.log("[GorgiasWebhook] GORGIAS_POST_OK", { ticket: ticketId });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[GorgiasWebhook] FAIL", { step: "async_handler", err: msg });
+      }
+    })();
 
     return NextResponse.json<SuccessResponse>({
       success: true,
+      queued: true,
       ticket_id: ticketId,
       message_id: messageId ?? undefined,
       received_event: eventType ?? undefined,
