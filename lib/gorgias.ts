@@ -1,3 +1,6 @@
+import type { ChatLinkFormat } from "./chat-formatter";
+import { formatBodyForChat } from "./chat-formatter";
+
 export interface PostGorgiasMessageArgs {
   ticketId: string;
   body: string;
@@ -5,6 +8,17 @@ export interface PostGorgiasMessageArgs {
   eventContext?: string | null;
   /** Gorgias customer ID (ticket.customer.id); used as receiver for chat so the widget shows the reply. */
   customerId?: string | number | null;
+  /** Correlation ID for logging (webhook receipt → Abacus → Gorgias post). */
+  requestId?: string | null;
+}
+
+/** Response from Gorgias create-message API; used to detect widget delivery failure. */
+export interface GorgiasMessageResponse {
+  id?: unknown;
+  failed_datetime?: string | null;
+  last_sending_error?: { error?: string } | null;
+  source?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 function requiredEnv(name: string): string {
@@ -72,7 +86,7 @@ export async function getChatVisitorId(ticketId: string): Promise<string | null>
   }
 }
 
-export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<void> {
+export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<GorgiasMessageResponse | undefined> {
   const baseUrl = buildGorgiasBaseUrl();
   const auth = buildAuthHeader();
   const email = requiredEnv("GORGIAS_EMAIL");
@@ -90,7 +104,9 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
     const eventCtx = args.eventContext?.trim() || null;
 
     const visitorId = ticketVisitorId;
+    const requestId = args.requestId ?? null;
     console.log("[GorgiasWebhook] chat visitor source", {
+      requestId,
       ticketId: args.ticketId,
       ticketVisitorId: ticketVisitorId ? `...${ticketVisitorId.slice(-8)}` : null,
       eventContext: eventCtx ? `...${eventCtx.slice(-8)}` : null,
@@ -103,96 +119,185 @@ export async function postGorgiasMessage(args: PostGorgiasMessageArgs): Promise<
       throw new Error("Could not find chat visitor ID for ticket");
     }
 
-    // Per Gorgias troubleshooting guide: working payload includes body_html as simple <p> (no links).
-    const safeHtml = (s: string) =>
-      s
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/\n/g, "<br>");
-    const payload: Record<string, unknown> = {
-      body: args.body,
-      body_text: args.body,
-      body_html: `<p>${safeHtml(args.body)}</p>`,
-      channel: "chat",
-      via: "api",
-      from_agent: true,
-      sender: { email },
-      source: {
-        type: "chat",
-        to: [{ address: visitorId }],
-        from: { address: "" },
-      },
-    };
-    // Do NOT send receiver for chat — doc: "receiver: Used for email/SMS, NOT for chat". Sending receiver can cause "Last message not delivered".
-
-    // #region agent log
-    const visitorIdSuffix = visitorId ? visitorId.slice(-8) : "";
-    fetch("http://127.0.0.1:7318/ingest/6e991345-16b8-41c6-b3bf-80cb1e473188", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "6d486c" },
-      body: JSON.stringify({
-        sessionId: "6d486c",
-        location: "gorgias.ts:pre_post",
-        message: "payload before create message",
-        data: {
-          ticketId: args.ticketId,
-          visitorIdSuffix,
-          usedTicketFetch: true,
-          noReceiver: true,
-          hypothesisId: "H1,H2,H3",
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/json",
-        authorization: auth,
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-
-    const resText = await res.text();
-    if (!res.ok) {
-      console.error("[GorgiasWebhook] FAIL step=gorgias_post_http", {
-        status: res.status,
-        body: resText?.slice(0, 4000),
-      });
-      throw new Error(`Gorgias HTTP ${res.status}`);
+    const linkFormat = (process.env.CHAT_LINK_FORMAT || "html").trim().toLowerCase() as ChatLinkFormat;
+    if (linkFormat !== "plain" && linkFormat !== "html" && linkFormat !== "markdown") {
+      throw new Error(`Invalid CHAT_LINK_FORMAT: ${process.env.CHAT_LINK_FORMAT}. Use plain, html, or markdown.`);
     }
-    // Log full response for debugging chat delivery
-    try {
-      const created = resText ? (JSON.parse(resText) as Record<string, unknown>) : null;
-      const failedAt = created?.failed_datetime;
-      const lastError = created?.last_sending_error as { error?: string } | undefined;
-      const errMsg = lastError?.error;
-      const msgId = created?.id;
-      const sourceResp = created?.source as Record<string, unknown> | undefined;
-      console.log("[GorgiasWebhook] GORGIAS_RESPONSE", {
-        ticketId: args.ticketId,
-        messageId: msgId ?? null,
-        failed_datetime: failedAt ?? null,
-        last_sending_error: errMsg ?? null,
-        source_type: sourceResp?.type ?? null,
-        source_to: JSON.stringify(sourceResp?.to ?? null),
-      });
-      if (failedAt || errMsg) {
-        console.warn("[GorgiasWebhook] message created but delivery failed", {
-          ticketId: args.ticketId,
-          failed_datetime: failedAt ?? undefined,
-          last_sending_error: errMsg ?? undefined,
-        });
+    const maxChars = Number(process.env.GORGIAS_CHAT_MAX_CHARS || 2200);
+    const maxUrls = Number(process.env.GORGIAS_CHAT_MAX_URLS || 12);
+
+    const splitIntoChunks = (text: string, maxLen: number): string[] => {
+      const t = text.trim();
+      if (t.length <= maxLen) return [t];
+      const blocks = t.split(/\n{2,}/g);
+      const out: string[] = [];
+      let cur = "";
+      const pushCur = () => {
+        const c = cur.trim();
+        if (c) out.push(c);
+        cur = "";
+      };
+      for (const b of blocks) {
+        const next = cur ? `${cur}\n\n${b}` : b;
+        if (next.length <= maxLen) {
+          cur = next;
+          continue;
+        }
+        if (cur) pushCur();
+        if (b.length <= maxLen) {
+          cur = b;
+          continue;
+        }
+        // Fallback: split very long block by lines, then by spaces.
+        const lines = b.split("\n");
+        let lineCur = "";
+        const pushLineCur = () => {
+          const c = lineCur.trim();
+          if (c) out.push(c);
+          lineCur = "";
+        };
+        for (const line of lines) {
+          const candidate = lineCur ? `${lineCur}\n${line}` : line;
+          if (candidate.length <= maxLen) {
+            lineCur = candidate;
+            continue;
+          }
+          if (lineCur) pushLineCur();
+          if (line.length <= maxLen) {
+            lineCur = line;
+            continue;
+          }
+          // Split by words
+          const words = line.split(/\s+/);
+          let wCur = "";
+          for (const w of words) {
+            const wNext = wCur ? `${wCur} ${w}` : w;
+            if (wNext.length <= maxLen) {
+              wCur = wNext;
+            } else {
+              if (wCur) out.push(wCur);
+              wCur = w;
+            }
+          }
+          if (wCur) out.push(wCur);
+        }
+        if (lineCur) pushLineCur();
       }
-    } catch {
-      /* ignore */
+      if (cur) pushCur();
+      return out.length ? out : [t.slice(0, maxLen)];
+    };
+
+    const urlCount = (args.body.match(/https:\/\//g) || []).length;
+    const needsChunking = args.body.length > maxChars || urlCount > maxUrls;
+    const chunks = needsChunking ? splitIntoChunks(args.body, maxChars) : [args.body.trim()];
+    if (needsChunking) {
+      console.warn("[GorgiasWebhook] payload chunking enabled", {
+        requestId,
+        ticketId: args.ticketId,
+        chunks: chunks.length,
+        bodyLength: args.body.length,
+        urlCount,
+        maxChars,
+        maxUrls,
+      });
     }
+
+    let lastCreated: GorgiasMessageResponse | undefined;
+
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunk = chunks[idx] ?? "";
+      const { body_text, body_html } = formatBodyForChat(chunk, linkFormat);
+
+      const payload: Record<string, unknown> = {
+        body: body_text,
+        body_text,
+        body_html,
+        channel: "chat",
+        via: "api",
+        from_agent: true,
+        sender: { email },
+        source: {
+          type: "chat",
+          to: [{ address: visitorId }],
+          from: { address: "" },
+        },
+      };
+      // Do NOT send receiver for chat — doc: "receiver: Used for email/SMS, NOT for chat". Sending receiver can cause "Last message not delivered".
+
+      const hasAnchorTag = body_html.includes("<a ");
+      console.log("[GorgiasWebhook] GORGIAS_PAYLOAD", {
+        requestId,
+        ticketId: args.ticketId,
+        linkFormat,
+        chunk_index: idx + 1,
+        chunk_total: chunks.length,
+        body_text_length: body_text.length,
+        body_html_length: body_html.length,
+        body_html_has_anchor: hasAnchorTag,
+        body_text_sample: body_text.slice(0, 200),
+        body_html_sample: body_html.slice(0, 200),
+      });
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: auth,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      const resText = await res.text();
+      if (!res.ok) {
+        console.error("[GorgiasWebhook] FAIL step=gorgias_post_http", {
+          requestId,
+          ticketId: args.ticketId,
+          status: res.status,
+          body: resText?.slice(0, 4000),
+        });
+        throw new Error(`Gorgias HTTP ${res.status}`);
+      }
+
+      let created: GorgiasMessageResponse | null = null;
+      try {
+        created = resText ? (JSON.parse(resText) as GorgiasMessageResponse) : null;
+        const failedAt = created?.failed_datetime;
+        const lastError = created?.last_sending_error as { error?: string } | undefined;
+        const errMsg = lastError?.error;
+        const msgId = created?.id;
+        const sourceResp = created?.source as Record<string, unknown> | undefined;
+        console.log("[GorgiasWebhook] GORGIAS_API_RESPONSE", {
+          requestId,
+          ticketId: args.ticketId,
+          messageId: msgId ?? null,
+          failed_datetime: failedAt ?? null,
+          last_sending_error: errMsg ?? null,
+          source_type: sourceResp?.type ?? null,
+          source_to: JSON.stringify(sourceResp?.to ?? null),
+          responseKeys: created ? Object.keys(created) : [],
+          delivery_ok: !failedAt && !errMsg,
+        });
+        if (failedAt || errMsg) {
+          console.warn("[GorgiasWebhook] CHAT_WIDGET_DELIVERY: message created but delivery failed", {
+            requestId,
+            ticketId: args.ticketId,
+            failed_datetime: failedAt ?? undefined,
+            last_sending_error: errMsg ?? undefined,
+          });
+          lastCreated = created ?? undefined;
+          // Stop early; remaining chunks would likely also fail delivery
+          break;
+        }
+      } catch {
+        /* ignore */
+      }
+
+      lastCreated = created ?? undefined;
+    }
+
+    return lastCreated;
   } finally {
     clearTimeout(t);
   }

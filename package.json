@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:formatter": "tsx lib/chat-formatter.test.ts",
+    "test:link-formats": "tsx scripts/send-link-format-tests.ts",
+    "test:widget-delivery": "tsx scripts/smoke-test-widget-delivery.ts",
+    "inspect:ticket": "tsx scripts/inspect-ticket-messages.ts"
   },
   "dependencies": {
     "next": "14.2.35",
@@ -14,6 +18,8 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "dotenv": "^16.4.5",
+    "tsx": "^4.19.2",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

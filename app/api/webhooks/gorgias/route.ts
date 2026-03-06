@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 import { getAbacusAnswer } from "@/lib/abacus";
@@ -130,7 +131,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
     const fromOurSender =
       !!senderEmail && !!ourAgentEmail && senderEmail.toLowerCase() === ourAgentEmail;
 
+    const requestId = crypto.randomBytes(4).toString("hex");
     console.log("[GorgiasWebhook] INBOUND", {
+      requestId,
       ticket: ticketId ?? "unknown",
       msg: messageId ?? "unknown",
       from_agent: fromAgent,
@@ -236,18 +239,33 @@ export async function POST(request: NextRequest): Promise<NextResponse<WebhookRe
         const convStrategy = (process.env.ABACUS_CONV_KEY_STRATEGY || "ticket").trim().toLowerCase();
         const conversationId = convStrategy === "ticket" ? ticketId : ticketId;
 
-        console.log("[GorgiasWebhook] ABACUS_CALL_START", { ticket: ticketId });
+        console.log("[GorgiasWebhook] ABACUS_CALL_START", { requestId, ticket: ticketId, messageLength: messageText.length });
         const answer = await getAbacusAnswer({
           conversationId,
           message: messageText,
           customerEmail,
           ticketId,
         });
-        console.log("[GorgiasWebhook] ABACUS_CALL_OK", { ticket: ticketId });
+        console.log("[GorgiasWebhook] ABACUS_RESPONSE", {
+          requestId,
+          ticket: ticketId,
+          answerLength: answer.length,
+          answerSample: answer.slice(0, 300),
+        });
 
-        console.log("[GorgiasWebhook] GORGIAS_POST_START", { ticket: ticketId });
-        await postGorgiasMessage({ ticketId, body: answer, eventContext, customerId });
-        console.log("[GorgiasWebhook] GORGIAS_POST_OK", { ticket: ticketId });
+        console.log("[GorgiasWebhook] GORGIAS_POST_START", { requestId, ticket: ticketId });
+        const gorgiasResponse = await postGorgiasMessage({
+          ticketId,
+          body: answer,
+          eventContext,
+          customerId,
+          requestId,
+        });
+        console.log("[GorgiasWebhook] GORGIAS_POST_OK", {
+          requestId,
+          ticket: ticketId,
+          delivery_ok: gorgiasResponse ? !gorgiasResponse.failed_datetime && !gorgiasResponse.last_sending_error : undefined,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[GorgiasWebhook] FAIL", { step: "async_handler", err: msg });
