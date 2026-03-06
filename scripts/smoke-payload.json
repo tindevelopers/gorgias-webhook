@@ -1,0 +1,10 @@
+{
+  "event": "message_created",
+  "ticket": { "id": 123, "customer": { "email": "customer@example.com" } },
+  "message": {
+    "id": 456,
+    "body_text": "Hello — smoke test",
+    "from_agent": false,
+    "sender": { "email": "customer@example.com" }
+  }
+}

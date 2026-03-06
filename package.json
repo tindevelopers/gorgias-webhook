@@ -10,6 +10,7 @@
     "test:formatter": "tsx lib/chat-formatter.test.ts",
     "test:link-formats": "tsx scripts/send-link-format-tests.ts",
     "test:widget-delivery": "tsx scripts/smoke-test-widget-delivery.ts",
+    "smoke-test": "tsx scripts/smoke-test-webhook.ts",
     "inspect:ticket": "tsx scripts/inspect-ticket-messages.ts"
   },
   "dependencies": {
